@@ -1,5 +1,3 @@
-# Strava API code created by James Prestage
-
 import requests
 from flask import Flask, request, jsonify, redirect
 import sqlite3
@@ -90,23 +88,27 @@ def get_activities():
     activities = response.json()
     conn = sqlite3.connect('activities.db')
     cursor = conn.cursor()
-    
+
     for activity in activities:
+        start_latlng = activity.get('start_latlng')
+        if not start_latlng or len(start_latlng) < 2:
+            continue
+
         athlete_id = activity.get('athlete', {}).get('id', 0)
         activity_id = activity.get('id')
         name = activity.get('name')
         start_date_local = activity.get('start_date_local')  # Start Time (Local)
         distance = activity.get('distance')
         activity_type = activity.get('type')
-        start_lat = activity.get('start_latlng', [None, None])[0]
-        start_long = activity.get('start_latlng', [None, None])[1]
+        start_lat = start_latlng[0]
+        start_long = start_latlng[1]
 
         cursor.execute('''
             INSERT OR IGNORE INTO activities (
                 athlete_id, activity_id, name, start_date_local, distance, type, start_lat, start_long
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (athlete_id, activity_id, name, start_date_local, distance, activity_type, start_lat, start_long))
-    
+
     conn.commit()
     conn.close()
 
@@ -116,10 +118,10 @@ def get_activities():
             "start_date_local": activity.get("start_date_local"),
             "distance": activity.get("distance"),
             "type": activity.get("type"),
-            "start_lat": activity.get("start_latlng", [None, None])[0],
-            "start_long": activity.get("start_latlng", [None, None])[1],
+            "start_lat": (activity.get("start_latlng") or [None, None])[0],
+            "start_long": (activity.get("start_latlng") or [None, None])[1],
         }
-        for activity in activities
+        for activity in activities if activity.get("start_latlng") and len(activity.get("start_latlng")) >= 2
     ]
     return jsonify(filtered_activities)
 

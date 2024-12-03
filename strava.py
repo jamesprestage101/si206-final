@@ -2,8 +2,10 @@ import requests
 from flask import Flask, request, jsonify, redirect
 import sqlite3
 import os
+from weather import setup_weather_routes
 
 app = Flask(__name__)
+setup_weather_routes(app)
 
 # My Strava API app credentials
 CLIENT_ID = "141007"

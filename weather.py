@@ -8,10 +8,11 @@ import matplotlib.pyplot as plt
 # Use a non-GUI backend for Matplotlib
 matplotlib.use('Agg')
 
+# As of December 5th 2024
 # OpenWeatherMap API Key (James' API Key - currently awaiting a response from OpenWeatherMap to extend historical weather data range)
 API_KEY = "84e21ea14bda415048a5852c8a6c9999"
 
-# Historical Weather API URL (verify this with OpenWeatherMap documentation)
+# Historical Weather API URL
 HISTORICAL_URL = "https://history.openweathermap.org/data/2.5/history/city"
 
 # Database file
@@ -21,6 +22,7 @@ def init_weather_db():
     """Initialize the weather table in the database if it doesn't exist."""
     if os.path.exists(DB_FILE):
         conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS weather (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,7 +90,7 @@ def store_weather_data(activity_id, weather_data):
             current_weather.get('weather', [{}])[0].get('main', 'Unknown'),
             current_weather.get('weather', [{}])[0].get('description', 'Unknown'),
             weather_data.get('city', {}).get('timezone', 0),
-            0  # timezone_offset might not be available
+            0
         ))
         conn.commit()
         print(f"Weather data for activity {activity_id} stored successfully.")
@@ -216,7 +218,7 @@ def setup_weather_routes(app):
         except Exception as e:
             return f"Failed to generate Average Moving Time Graph: {e}"
 
-        # Render both graphs on a single page
+        # Rendering both the graphs on a single page
         html_template = f"""
         <h1>Weather Analysis Graphs</h1>
         <div>

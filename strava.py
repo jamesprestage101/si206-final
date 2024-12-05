@@ -2,7 +2,7 @@ import requests
 import sqlite3
 import os
 import time
-from flask import Flask, request, jsonify, redirect
+from flask import Flask, request, redirect
 
 # Flask app initialization
 app = Flask(__name__)
@@ -12,7 +12,7 @@ CLIENT_ID = "141007"
 CLIENT_SECRET = "052da5de5f06be8d811655a36f081cfad12ce338"
 REDIRECT_URI = "http://127.0.0.1:5000/callback"
 
-# Initialize database
+# Initialize database!
 def init_db():
     if not os.path.exists('activities.db'):
         conn = sqlite3.connect('activities.db')

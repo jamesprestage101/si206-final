@@ -1,19 +1,19 @@
 import requests
 import sqlite3
 import os
-from flask import Flask, send_from_directory, render_template_string
+import time
 import matplotlib
 import matplotlib.pyplot as plt
+from flask import Flask, send_from_directory, render_template_string
 
 # Use a non-GUI backend for Matplotlib
 matplotlib.use('Agg')
 
-# As of December 5th 2024
-# OpenWeatherMap API Key (James' API Key - currently awaiting a response from OpenWeatherMap to extend historical weather data range)
-API_KEY = "84e21ea14bda415048a5852c8a6c9999"
+# Updated API Key
+API_KEY = "4d21ed7c97869390f4c195badb4c451c"
 
 # Historical Weather API URL
-HISTORICAL_URL = "https://history.openweathermap.org/data/2.5/history/city"
+HISTORICAL_URL = "https://api.openweathermap.org/data/3.0/onecall/timemachine"
 
 # Database file
 DB_FILE = 'activities.db'
@@ -48,35 +48,29 @@ def fetch_historical_weather(lat, lon, timestamp):
     params = {
         'lat': lat,
         'lon': lon,
-        'type': 'hour',
-        'start': int(timestamp),  # Ensure timestamp is an integer
-        'cnt': 1,  # Number of timestamps to retrieve
+        'dt': int(timestamp),
         'appid': API_KEY,
         'units': 'metric'
     }
-    
     try:
         response = requests.get(HISTORICAL_URL, params=params)
-        response.raise_for_status()  # Raise an exception for bad status codes
-        
+        response.raise_for_status()
         return response.json()
     except requests.RequestException as e:
         print(f"Error fetching historical weather data: {e}")
-        print(f"Response content: {response.text if 'response' in locals() else 'No response'}")
         return None
 
 def store_weather_data(activity_id, weather_data):
     """Store weather data into the SQLite database."""
-    if not weather_data or 'list' not in weather_data or not weather_data['list']:
-        print(f"No weather data available for activity {activity_id}")
+    if not weather_data or 'data' not in weather_data:
+        print(f"No valid weather data available for activity {activity_id}")
         return
 
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-
     try:
-        current_weather = weather_data['list'][0]
-        
+        current_weather = weather_data['data'][0]
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+
         cursor.execute('''
             INSERT OR IGNORE INTO weather (
                 activity_id, temperature, humidity, wind_speed, 
@@ -84,20 +78,24 @@ def store_weather_data(activity_id, weather_data):
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             activity_id,
-            current_weather.get('main', {}).get('temp'),
-            current_weather.get('main', {}).get('humidity'),
-            current_weather.get('wind', {}).get('speed'),
+            current_weather.get('temp'),
+            current_weather.get('humidity'),
+            current_weather.get('wind_speed'),
             current_weather.get('weather', [{}])[0].get('main', 'Unknown'),
             current_weather.get('weather', [{}])[0].get('description', 'Unknown'),
-            weather_data.get('city', {}).get('timezone', 0),
-            0
+            weather_data.get('timezone', 'Unknown'),
+            weather_data.get('timezone_offset', 0)
         ))
+
         conn.commit()
         print(f"Weather data for activity {activity_id} stored successfully.")
-    except Exception as e:
+    except sqlite3.Error as e:
         print(f"Error storing weather data for activity {activity_id}: {e}")
+    except KeyError as e:
+        print(f"Missing expected data in weather response: {e}")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def process_activities_weather():
     """Fetch historical weather data for each activity and store it in the database."""

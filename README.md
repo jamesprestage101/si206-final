@@ -1,5 +1,6 @@
 # SI 206 Final Project
 
+[Demo Video](https://drive.google.com/file/d/1Iy6UJsjNulFg7sBUX-bdO_vZgzbH7HZw/view?usp=sharing)
 [Report Link](https://docs.google.com/document/d/1Idu9cLUwzLCPCFJIh_unOOtj5RFnMbef7SegGVh-mBo/edit?usp=sharing)
 
 XC Timekeepers - Using Strava API & OpenWeatherAPI to determine how/if weather conditions affect exercise.

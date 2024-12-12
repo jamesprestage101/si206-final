@@ -5,7 +5,7 @@ import time
 import matplotlib
 import matplotlib.pyplot as plt
 from flask import Flask, send_from_directory, render_template_string
-
+import csv
 # Use a non-GUI backend for Matplotlib
 matplotlib.use('Agg')
 
@@ -198,12 +198,11 @@ def setup_weather_routes(app):
 
     @app.route('/weather_graphs', methods=['GET'])
     def weather_graphs():
-        """Generate two graphs: average distance and average moving time by weather description."""
+        """Generate three visualizations: average distance (bar graph), average moving time (scatter plot), and a stack plot for activities count by weather description."""
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
 
-        # IMPORTANT: Only activity data from the last year can currently be used with OpenWeatherMap API
-        # Graph 1: Average activity distance by weather description
+        # Graph 1 Average activity distance by weather description
         query1 = '''
             SELECT w.weather_description, 
                 AVG(a.distance) as avg_distance
@@ -215,7 +214,7 @@ def setup_weather_routes(app):
         cursor.execute(query1)
         data_distance = cursor.fetchall()
 
-        # Graph 2: Average moving time by weather description
+        # Graph 2 Average moving time by weather description
         query2 = '''
             SELECT w.weather_description, 
                 AVG(a.moving_time) as avg_moving_time
@@ -226,12 +225,23 @@ def setup_weather_routes(app):
         '''
         cursor.execute(query2)
         data_moving_time = cursor.fetchall()
+
+        # Graph 3 Activity count by weather description for stack plot
+        query3 = '''
+            SELECT w.weather_description, COUNT(a.activity_id) as activity_count
+            FROM activities AS a
+            JOIN weather AS w ON a.activity_id = w.activity_id
+            GROUP BY w.weather_description
+            ORDER BY w.weather_description ASC
+        '''
+        cursor.execute(query3)
+        data_activity_count = cursor.fetchall()
         conn.close()
 
-        if not data_distance or not data_moving_time:
+        if not data_distance or not data_moving_time or not data_activity_count:
             return "No data available for graphs."
 
-        # Create Graph 1: Average Distance
+        # Create Graph 1 average distance (bar graph)
         try:
             weather_descriptions_distance, avg_distances = zip(*data_distance)
             fig1, ax1 = plt.subplots(figsize=(12, 6))
@@ -248,24 +258,42 @@ def setup_weather_routes(app):
         except Exception as e:
             return f"Failed to generate Average Distance Graph: {e}"
 
-        # Create Graph 2: Average Moving Time
+        # Graph 2 average moving time (scatter plot)
         try:
             weather_descriptions_time, avg_moving_time = zip(*data_moving_time)
             fig2, ax2 = plt.subplots(figsize=(12, 6))
-            ax2.bar(weather_descriptions_time, avg_moving_time, color='orange')
+            ax2.scatter(weather_descriptions_time, avg_moving_time, color='orange')
             ax2.set_title('Average Moving Time by Weather Description')
             ax2.set_ylabel('Average Moving Time (seconds)')
             ax2.set_xlabel('Weather Description')
             ax2.set_xticks(range(len(weather_descriptions_time)))
             ax2.set_xticklabels(weather_descriptions_time, rotation=45, ha='right')
-            plot_path2 = 'static/weather_graph_avg_time.png'
+            plot_path2 = 'static/weather_graph_avg_time_scatter.png'
             plt.tight_layout()
             plt.savefig(plot_path2)
             plt.close(fig2)
         except Exception as e:
-            return f"Failed to generate Average Moving Time Graph: {e}"
+            return f"Failed to generate Average Moving Time Scatter Plot: {e}"
 
-        # Rendering both the graphs on a single page
+        # Graph 3 activity count by weather description (stack plot)
+        try:
+            weather_descriptions_stack, activity_counts = zip(*data_activity_count)
+            fig3, ax3 = plt.subplots(figsize=(12, 6))
+            ax3.stackplot(range(len(weather_descriptions_stack)), activity_counts, labels=['Activity Count'], colors=['green'])
+            ax3.set_title('Activity Count by Weather Description (Stack Plot)')
+            ax3.set_ylabel('Activity Count')
+            ax3.set_xlabel('Weather Description')
+            ax3.set_xticks(range(len(weather_descriptions_stack)))
+            ax3.set_xticklabels(weather_descriptions_stack, rotation=45, ha='right')
+            ax3.legend(loc='upper left')
+            plot_path3 = 'static/weather_graph_activity_count_stack.png'
+            plt.tight_layout()
+            plt.savefig(plot_path3)
+            plt.close(fig3)
+        except Exception as e:
+            return f"Failed to generate Activity Count Stack Plot: {e}"
+
+        # Rendering the graphs on a single page
         html_template = f"""
         <h1>Weather Analysis Graphs</h1>
         <div>
@@ -273,16 +301,21 @@ def setup_weather_routes(app):
             <img src="/{plot_path1}" alt="Average Distance Graph">
         </div>
         <div>
-            <h2>Average Moving Time by Weather Description</h2>
-            <img src="/{plot_path2}" alt="Average Moving Time Graph">
+            <h2>Average Moving Time by Weather Description (Scatter Plot)</h2>
+            <img src="/{plot_path2}" alt="Average Moving Time Scatter Plot">
+        </div>
+        <div>
+            <h2>Activity Count by Weather Description (Stack Plot)</h2>
+            <img src="/{plot_path3}" alt="Activity Count Stack Plot">
         </div>
         """
         return html_template
 
-    @app.route('/static/<path:filename>')
-    def static_files(filename):
-        """Serve static files from the static folder."""
-        return send_from_directory('static', filename)
+
+        @app.route('/static/<path:filename>')
+        def static_files(filename):
+            """Serve static files from the static folder."""
+            return send_from_directory('static', filename)
 
 # Initialize Flask app
 app = Flask(__name__)

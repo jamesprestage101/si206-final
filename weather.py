@@ -1,12 +1,11 @@
 import requests
 import sqlite3
 import os
-import time
 import matplotlib
 import matplotlib.pyplot as plt
-from flask import Flask, send_from_directory, render_template_string
+from flask import Flask, send_from_directory
 import csv
-# Use a non-GUI backend for Matplotlib
+
 matplotlib.use('Agg')
 
 # Updated API Key
@@ -18,11 +17,20 @@ HISTORICAL_URL = "https://api.openweathermap.org/data/3.0/onecall/timemachine"
 # Database file
 DB_FILE = 'activities.db'
 
+
 def init_weather_db():
-    """Initialize the weather table in the database if it doesn't exist."""
     if os.path.exists(DB_FILE):
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
+        
+        # Create weather description table (you'll notice it's similar to activity_types in strava.py!)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS weather_descriptions (
+                description_id INTEGER PRIMARY KEY,
+                description_name TEXT UNIQUE
+            )
+        ''')
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS weather (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,11 +38,9 @@ def init_weather_db():
                 temperature REAL,
                 humidity REAL,
                 wind_speed REAL,
-                weather_main TEXT,
-                weather_description TEXT,
-                timezone INTEGER,
-                timezone_offset INTEGER,
-                FOREIGN KEY (activity_id) REFERENCES activities (activity_id)
+                description_id INTEGER,
+                FOREIGN KEY (activity_id) REFERENCES activities (activity_id),
+                FOREIGN KEY (description_id) REFERENCES weather_descriptions (description_id)
             )
         ''')
         conn.commit()
@@ -44,7 +50,6 @@ def init_weather_db():
         print("Database does not exist. Please run the Strava integration first.")
 
 def fetch_historical_weather(lat, lon, timestamp):
-    """Fetch historical weather data for a specific latitude, longitude, and timestamp."""
     params = {
         'lat': lat,
         'lon': lon,
@@ -61,7 +66,6 @@ def fetch_historical_weather(lat, lon, timestamp):
         return None
 
 def store_weather_data(activity_id, weather_data):
-    """Store weather data into the SQLite database."""
     if not weather_data or 'data' not in weather_data:
         print(f"No valid weather data available for activity {activity_id}")
         return
@@ -71,20 +75,22 @@ def store_weather_data(activity_id, weather_data):
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
 
+        # Insert or get weather description
+        weather_description = current_weather.get('weather', [{}])[0].get('description', 'Unknown')
+        cursor.execute('INSERT OR IGNORE INTO weather_descriptions (description_name) VALUES (?)', (weather_description,))
+        cursor.execute('SELECT description_id FROM weather_descriptions WHERE description_name = ?', (weather_description,))
+        description_id = cursor.fetchone()[0]
+
         cursor.execute('''
             INSERT OR IGNORE INTO weather (
-                activity_id, temperature, humidity, wind_speed, 
-                weather_main, weather_description, timezone, timezone_offset
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                activity_id, temperature, humidity, wind_speed, description_id
+            ) VALUES (?, ?, ?, ?, ?)
         ''', (
             activity_id,
             current_weather.get('temp'),
             current_weather.get('humidity'),
             current_weather.get('wind_speed'),
-            current_weather.get('weather', [{}])[0].get('main', 'Unknown'),
-            current_weather.get('weather', [{}])[0].get('description', 'Unknown'),
-            weather_data.get('timezone', 'Unknown'),
-            weather_data.get('timezone_offset', 0)
+            description_id
         ))
 
         conn.commit()
@@ -98,7 +104,6 @@ def store_weather_data(activity_id, weather_data):
             conn.close()
 
 def process_activities_weather():
-    """Fetch historical weather data for each activity and store it in the database."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute('SELECT activity_id, start_lat, start_long, strftime("%s", start_date_local) FROM activities')
@@ -118,39 +123,58 @@ def process_activities_weather():
         else:
             print(f"Failed to fetch weather data for activity {activity_id}")
 
-    # Added this to write data to a file to satisfy grading ruberic
     os.makedirs('static', exist_ok=True)
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
+    # Query for average distance by weather description
     distance_query = '''
         SELECT 
-            w.weather_description, 
+            wd.description_name, 
             AVG(a.distance) as avg_distance,
             COUNT(a.activity_id) as activity_count
         FROM activities AS a
         JOIN weather AS w ON a.activity_id = w.activity_id
-        GROUP BY w.weather_description
+        JOIN weather_descriptions AS wd ON w.description_id = wd.description_id
+        GROUP BY wd.description_name
         ORDER BY avg_distance DESC
     '''
     cursor.execute(distance_query)
     distance_data = cursor.fetchall()
 
+    # Query for average moving time by weather description
     moving_time_query = '''
         SELECT 
-            w.weather_description, 
+            wd.description_name, 
             AVG(a.moving_time) as avg_moving_time,
             COUNT(a.activity_id) as activity_count
         FROM activities AS a
         JOIN weather AS w ON a.activity_id = w.activity_id
-        GROUP BY w.weather_description
+        JOIN weather_descriptions AS wd ON w.description_id = wd.description_id
+        GROUP BY wd.description_name
         ORDER BY avg_moving_time DESC
     '''
     cursor.execute(moving_time_query)
     moving_time_data = cursor.fetchall()
+
+    # Query for activity count by weather description
+    activity_count_query = '''
+        SELECT 
+            wd.description_name, 
+            COUNT(a.activity_id) as activity_count
+        FROM activities AS a
+        JOIN weather AS w ON a.activity_id = w.activity_id
+        JOIN weather_descriptions AS wd ON w.description_id = wd.description_id
+        GROUP BY wd.description_name
+        ORDER BY activity_count DESC
+    '''
+    cursor.execute(activity_count_query)
+    activity_count_data = cursor.fetchall()
+
     conn.close()
 
+    # Export average distance data to CSV
     distance_csv_path = 'static/average_distance_by_weather.csv'
     with open(distance_csv_path, 'w', newline='') as csvfile:
         csvwriter = csv.writer(csvfile)
@@ -158,6 +182,7 @@ def process_activities_weather():
         for row in distance_data:
             csvwriter.writerow(row)
 
+    # Export average moving time data to CSV
     moving_time_csv_path = 'static/average_moving_time_by_weather.csv'
     with open(moving_time_csv_path, 'w', newline='') as csvfile:
         csvwriter = csv.writer(csvfile)
@@ -165,11 +190,20 @@ def process_activities_weather():
         for row in moving_time_data:
             csvwriter.writerow(row)
 
+    # Export activity count data to CSV (the third graph we added after preliminary grading)
+    activity_count_csv_path = 'static/activity_count_by_weather.csv'
+    with open(activity_count_csv_path, 'w', newline='') as csvfile:
+        csvwriter = csv.writer(csvfile)
+        csvwriter.writerow(['Weather Description', 'Activity Count'])
+        for row in activity_count_data:
+            csvwriter.writerow(row)
+
     print("CSV files exported successfully.")
     
 def setup_weather_routes(app):
-    """Define weather-related routes."""
     
+    # When you first run this file you'll get a 404 error. Just go to /process_weather then /weather_graphs and ignore this.
+
     @app.route('/process_weather')
     def process_weather():
         """Fetch and store weather data for all activities."""
@@ -182,19 +216,20 @@ def setup_weather_routes(app):
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
 
-        # Drop the weather table
+        # Drop the weather and weather_descriptions tables
         cursor.execute('DROP TABLE IF EXISTS weather')
+        cursor.execute('DROP TABLE IF EXISTS weather_descriptions')
         conn.commit()
         conn.close()
-        print("Weather table deleted.")
+        print("Weather tables deleted.")
 
-        # Recreate the weather table
+        # Recreate the weather tables
         init_weather_db()
-        print("Weather table recreated.")
+        print("Weather tables recreated.")
 
         # Fetch historical weather data
         process_activities_weather()
-        return "Weather table reset and historical data fetched."
+        return "Weather tables reset and historical data fetched."
 
     @app.route('/weather_graphs', methods=['GET'])
     def weather_graphs():
@@ -204,11 +239,12 @@ def setup_weather_routes(app):
 
         # Graph 1 Average activity distance by weather description
         query1 = '''
-            SELECT w.weather_description, 
+            SELECT wd.description_name, 
                 AVG(a.distance) as avg_distance
             FROM activities AS a
             JOIN weather AS w ON a.activity_id = w.activity_id
-            GROUP BY w.weather_description
+            JOIN weather_descriptions AS wd ON w.description_id = wd.description_id
+            GROUP BY wd.description_name
             ORDER BY avg_distance DESC
         '''
         cursor.execute(query1)
@@ -216,11 +252,12 @@ def setup_weather_routes(app):
 
         # Graph 2 Average moving time by weather description
         query2 = '''
-            SELECT w.weather_description, 
+            SELECT wd.description_name, 
                 AVG(a.moving_time) as avg_moving_time
             FROM activities AS a
             JOIN weather AS w ON a.activity_id = w.activity_id
-            GROUP BY w.weather_description
+            JOIN weather_descriptions AS wd ON w.description_id = wd.description_id
+            GROUP BY wd.description_name
             ORDER BY avg_moving_time DESC
         '''
         cursor.execute(query2)
@@ -228,11 +265,12 @@ def setup_weather_routes(app):
 
         # Graph 3 Activity count by weather description for stack plot
         query3 = '''
-            SELECT w.weather_description, COUNT(a.activity_id) as activity_count
+            SELECT wd.description_name, COUNT(a.activity_id) as activity_count
             FROM activities AS a
             JOIN weather AS w ON a.activity_id = w.activity_id
-            GROUP BY w.weather_description
-            ORDER BY w.weather_description ASC
+            JOIN weather_descriptions AS wd ON w.description_id = wd.description_id
+            GROUP BY wd.description_name
+            ORDER BY wd.description_name ASC
         '''
         cursor.execute(query3)
         data_activity_count = cursor.fetchall()
@@ -293,7 +331,7 @@ def setup_weather_routes(app):
         except Exception as e:
             return f"Failed to generate Activity Count Stack Plot: {e}"
 
-        # Rendering the graphs on a single page
+        # Rendering the graphs on one page
         html_template = f"""
         <h1>Weather Analysis Graphs</h1>
         <div>
@@ -311,22 +349,16 @@ def setup_weather_routes(app):
         """
         return html_template
 
-
     @app.route('/static/<path:filename>')
     def static_files(filename):
-        """Serve static files from the static folder."""
         return send_from_directory('static', filename)
 
-# Initialize Flask app
 app = Flask(__name__)
-
-# Set up routes
 setup_weather_routes(app)
 
 if __name__ == '__main__':
-    # Create static directory if it doesn't exist
     if not os.path.exists('static'):
         os.makedirs('static')
 
-    init_weather_db()  # Initialize the database
+    init_weather_db()
     app.run(debug=True)

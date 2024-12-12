@@ -312,10 +312,10 @@ def setup_weather_routes(app):
         return html_template
 
 
-        @app.route('/static/<path:filename>')
-        def static_files(filename):
-            """Serve static files from the static folder."""
-            return send_from_directory('static', filename)
+    @app.route('/static/<path:filename>')
+    def static_files(filename):
+        """Serve static files from the static folder."""
+        return send_from_directory('static', filename)
 
 # Initialize Flask app
 app = Flask(__name__)
